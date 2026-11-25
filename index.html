@@ -166,6 +166,8 @@
   .toggle-btn.neg.on{background:#F6E3E1;border-color:var(--pink);color:#9A4F4B;}
   .pill.gray{background:#E9E4DD;color:#6E665C;}
   .del-btn.edit{color:var(--teal);}
+  .msg-btn{appearance:none;display:block;width:100%;border:0;background:#E2F3EA;color:#2E7A55;border-radius:10px;padding:7px 8px;font-family:'Thmanyah Sans',sans-serif;font-size:11px;font-weight:700;cursor:pointer;margin-bottom:6px;white-space:nowrap;}
+  .btn-wa{background:#25D366;color:#fff;}
 </style>
 </head>
 <body>
@@ -220,9 +222,10 @@
         <li><span class="pill warn">🚫 ما دفعت</span> تواصلتوا معها وما راح تدفع. ما تنحسب من المقاعد.</li>
         <li><span class="pill gray">❌ ألغت</span> الأم ألغت الحضور. ما تنحسب من المقاعد.</li>
         <li><b>🗑 حذف (مكرر)</b> للتسجيلات المكررة بس. يختفي التسجيل من اللوحة ويبقى في الشيت معلّم «محذوف».</li>
+        <li><span class="pill star">⭐ من أطفال سمة · مجاني</span> طفل سجّل من الموقع وهو أصلاً من أطفال سمة. اضغطوا عنده <b>⭐ من أطفال سمة (مجاني)</b> فيصير حضوره مجاني وما يحتاج تحويل.</li>
         <li><span class="pill star">⭐ طالب في سمة</span> من أطفال سمة، حضوره مجاني.</li>
       </ul>
-      <small>الأرقام تحت محسوبة <b>بعدد الأطفال</b> مو بعدد الطلبات. الطلب الواحد ممكن يكون فيه أكثر من طفل، ومتابعة الطفلين في نفس الطلب مشتركة.</small>
+      <small>الأرقام تحت محسوبة <b>بعدد الأطفال</b> مو بعدد الطلبات. الطلب الواحد ممكن يكون فيه أكثر من طفل، وكل طفل له أزرار متابعة خاصة فيه، حتى لو كان مع أخوه في نفس الطلب. زر <b>💬 رسالة واتساب</b> يجهّز لكم رسالة تناسب حالة الطفل.</small>
     </div>
     <div class="kpis" id="odKpis"></div>
     <div class="filters">
@@ -247,6 +250,19 @@
     <div class="row-count" id="odCount"></div>
     <div id="odContent"><div class="loader">جارِ تحميل البيانات...</div></div>
   </section>
+</div>
+
+<div class="modal" id="msgModal">
+  <div class="modal-box">
+    <h3 id="msgTitle">💬 رسالة</h3>
+    <p class="sub" style="margin:0 0 8px">الرسالة جاهزة حسب حالة الطفل، وتقدرين تعدّلين عليها قبل الإرسال.</p>
+    <textarea id="msgInput" style="min-height:200px"></textarea>
+    <div class="modal-actions">
+      <button type="button" class="btn-save" id="msgCopy">📋 نسخ الرسالة</button>
+      <button type="button" class="btn-wa" id="msgWa">فتح واتساب وإرسال</button>
+      <button type="button" class="btn-cancel" onclick="closeMsg()">إغلاق</button>
+    </div>
+  </div>
 </div>
 
 <div class="modal" id="addModal">
@@ -421,11 +437,12 @@ async function loadOD(){
   }
 }
 
-/* حالة الدفع الفعلية لكل طلب */
-function payState(o){
-  if (o.cancel) return 'cancelled';
-  if (o.paid) return 'confirmed';
-  if (o.nopay) return 'nopay';
+/* حالة كل طفل (المتابعة صارت لكل طفل لحاله) */
+function payState(o, k){
+  if (k.cancel) return 'cancelled';
+  if (k.simahkid) return 'simahkid';
+  if (k.paid) return 'confirmed';
+  if (k.nopay) return 'nopay';
   if (/مرفوع/.test(o.status)) return 'receipt';
   if (/انتهى|ملغ/.test(o.status)) return 'expired';
   if (/بانتظار/.test(o.status)) return (o.ts && Date.now() - o.ts > HOLD_MS) ? 'expired' : 'wait';
@@ -438,41 +455,38 @@ const PAY_PILL = {
   expired:   '<span class="pill warn">⌛ انتهى الحجز</span>',
   nopay:     '<span class="pill warn">🚫 ما دفعت</span>',
   cancelled: '<span class="pill gray">❌ ألغت</span>',
+  simahkid:  '<span class="pill star">⭐ من أطفال سمة · مجاني</span>',
   other:     ''
 };
 function minsLeft(o){ return Math.max(0, Math.ceil((HOLD_MS - (Date.now() - o.ts)) / 60000)); }
 
-/* صفوف موحّدة: طفل لكل صف في الورش، وعائلة لكل صف في المجاني */
 function buildRows(){
   const rows = [];
-  OD.orders.forEach((o, oi) => o.kids.forEach(k => rows.push({ type: 'reg', o, oi, k, pay: payState(o) })));
+  OD.orders.forEach((o, oi) => o.kids.forEach((k, ki) => rows.push({ type: 'reg', o, oi, k, ki, pay: payState(o, k) })));
   OD.simah.forEach((s, si) => rows.push({ type: 'simah', s, si }));
   OD.free.forEach((f, fi) => rows.push({ type: 'free', f, fi }));
   return rows;
 }
+const SEAT = ['confirmed','receipt','wait','simahkid','other'];
 
 function renderKpis(rows){
   const reg = rows.filter(r => r.type === 'reg');
-  const live = reg.filter(r => !['expired','cancelled','nopay'].includes(r.pay));
+  const live = reg.filter(r => SEAT.includes(r.pay));
   const sim = OD.simah.filter(s => !s.cancel);
   let pizza = 0, hot = 0;
   live.forEach(r => { if (r.k.pizza) pizza++; if (r.k.hot) hot++; });
   sim.forEach(s => { if (s.pizza) pizza++; if (s.hot) hot++; });
-  const paidKids = reg.filter(r => r.pay === 'confirmed' || r.pay === 'receipt').length;
-  const confKids = reg.filter(r => r.pay === 'confirmed').length;
-  const waitKids = reg.filter(r => r.pay === 'wait').length;
-  const expKids = reg.filter(r => r.pay === 'expired').length;
-  const cancKids = reg.filter(r => r.pay === 'cancelled').length + OD.simah.filter(s => s.cancel).length;
-  const nopayKids = reg.filter(r => r.pay === 'nopay').length;
-  const freePeople = OD.free.filter(f => !f.cancel).reduce((s,f) => s + (Number(f.adults)||0) + (Number(f.kids)||0), 0);
+  const cnt = st => reg.filter(r => r.pay === st).length;
+  const simahAll = sim.length + cnt('simahkid');
   const freeAct = OD.free.filter(f => !f.cancel);
   const freeKids = freeAct.reduce((s,f) => s + (Number(f.kids)||0), 0);
+  const freePeople = freeAct.reduce((s,f) => s + (Number(f.adults)||0) + (Number(f.kids)||0), 0);
   const bar = (n, cap) => `<div class="bar"><i style="width:${Math.min(100, Math.round(n/cap*100))}%"></i></div>`;
   document.getElementById('odKpis').innerHTML = `
-    <div class="kpi"><span>👧 أطفال الورش (محجوزين)</span><b>${live.length + sim.length} <small>طفل${sim.length?` · منهم ${sim.length} من سمة`:''}</small></b></div>
-    <div class="kpi"><span>💳 أطفال دفعوا</span><b>${paidKids} <small>· تأكّد ${confKids}</small></b></div>
-    <div class="kpi"><span>⏳ بانتظار التحويل / ⌛ انتهى</span><b>${waitKids} <small>/ ${expKids} طفل</small></b></div>
-    <div class="kpi"><span>❌ ألغت / 🚫 ما دفعت</span><b>${cancKids} <small>/ ${nopayKids} طفل</small></b></div>
+    <div class="kpi"><span>👧 أطفال الورش (محجوزين)</span><b>${live.length + sim.length} <small>طفل${simahAll?` · منهم ${simahAll} من سمة`:''}</small></b></div>
+    <div class="kpi"><span>💳 أطفال دفعوا</span><b>${cnt('confirmed') + cnt('receipt')} <small>· تأكّد ${cnt('confirmed')}</small></b></div>
+    <div class="kpi"><span>⏳ بانتظار التحويل / ⌛ انتهى</span><b>${cnt('wait')} <small>/ ${cnt('expired')} طفل</small></b></div>
+    <div class="kpi"><span>❌ ألغت / 🚫 ما دفعت</span><b>${cnt('cancelled') + OD.simah.filter(s => s.cancel).length} <small>/ ${cnt('nopay')} طفل</small></b></div>
     <div class="kpi"><span>🍕 ورشة البيتزا</span><b>${pizza} <small>/ ${OD.cap.pizza}</small></b>${bar(pizza, OD.cap.pizza)}</div>
     <div class="kpi"><span>☕ ورشة الهوت شوكليت</span><b>${hot} <small>/ ${OD.cap.hot}</small></b>${bar(hot, OD.cap.hot)}</div>
     <div class="kpi"><span>🎈 الفعاليات المجانية</span><b>${freeAct.length} <small>عائلة · ${freeKids} طفل · ${freePeople} شخص</small></b></div>`;
@@ -486,24 +500,23 @@ function rowText(r){
 function passType(r){
   if (!typeF.size) return true;
   if (r.type === 'free') return typeF.has('free');
-  if (r.type === 'simah' && typeF.has('simah')) return true;
+  if (typeF.has('simah') && (r.type === 'simah' || r.pay === 'simahkid')) return true;
   const k = r.type === 'reg' ? r.k : r.s;
   return (typeF.has('pizza') && k.pizza) || (typeF.has('hot') && k.hot);
 }
 function passPay(r){
   if (!payF.size) return true;
-  if (payF.has('cancelled') && ((r.type === 'reg' && r.pay === 'cancelled') || (r.type === 'simah' && r.s.cancel) || (r.type === 'free' && r.f.cancel))) return true;
-  if (r.type !== 'reg') return false;
-  return (payF.has('nopay') && r.pay === 'nopay') || (payF.has('paid') && (r.pay === 'confirmed' || r.pay === 'receipt')) ||
-         (payF.has('wait') && r.pay === 'wait') || (payF.has('expired') && r.pay === 'expired');
+  const st = r.type === 'reg' ? r.pay : r.type === 'simah' ? (r.s.cancel ? 'cancelled' : 'simah') : (r.f.cancel ? 'cancelled' : 'free');
+  return (payF.has('paid') && (st === 'confirmed' || st === 'receipt')) || payF.has(st);
 }
 function workshops(k){ return (k.pizza?'<span class="pill">🍕 بيتزا</span>':'') + (k.hot?'<span class="pill">☕ هوت شوكلت</span>':''); }
-function btn(kind, idx, field, on, label, neg){
-  return `<button type="button" class="toggle-btn ${neg?'neg':''} ${on?'on':''}" onclick="odToggle('${kind}',${idx},'${field}',this)">${label}</button>`;
+function btn(ref, field, on, label, neg){
+  return `<button type="button" class="toggle-btn ${neg?'neg':''} ${on?'on':''}" onclick="odToggle('${ref}','${field}',this)">${label}</button>`;
 }
-function noteCell(kind, idx, note){
-  return `<button type="button" class="note-btn ${note?'has':''}" onclick="openNote('${kind}',${idx})">📝 ${note?'تعديل':'إضافة'} ملاحظة</button>${note?`<div class="note-text">${esc(note)}</div>`:''}`;
+function noteCell(ref, note){
+  return `<button type="button" class="note-btn ${note?'has':''}" onclick="openNote('${ref}')">📝 ${note?'تعديل':'إضافة'} ملاحظة</button>${note?`<div class="note-text">${esc(note)}</div>`:''}`;
 }
+function msgBtn(ref){ return `<button type="button" class="msg-btn" onclick="openMsg('${ref}')">💬 رسالة واتساب</button>`; }
 
 function renderOD(){
   const all = buildRows();
@@ -514,84 +527,145 @@ function renderOD(){
   document.getElementById('odCount').textContent = [nKids ? nKids + ' طفل' : '', nFam ? nFam + ' عائلة (مجاني)' : ''].filter(Boolean).join(' · ') || '0';
   if (!rows.length){ document.getElementById('odContent').innerHTML = '<div class="empty-state">لا توجد نتائج.</div>'; return; }
   let html = `<div class="table-wrap"><table><thead><tr>
-    <th>#</th><th>الطفل / العائلة</th><th>التسجيل</th><th>ولي الأمر</th><th>الدفع</th><th>المتابعة</th><th>ملاحظات</th></tr></thead><tbody>`;
+    <th>#</th><th>الطفل / العائلة</th><th>التسجيل</th><th>ولي الأمر</th><th>الدفع</th><th>المتابعة</th><th>رسالة وملاحظات</th></tr></thead><tbody>`;
   rows.forEach((r, n) => {
     if (r.type === 'reg'){
-      const o = r.o, k = r.k;
+      const o = r.o, k = r.k, ref = `reg:${r.oi}:${r.ki}`;
       const allergy = o.allergy && !/لا يوجد|^لا$/.test(String(o.allergy)) ? `<div><span class="pill warn">⚠️ ${esc(o.allergy)}</span></div>` : '';
-      const sib = o.kids.length > 1 ? `<div class="sub">👨‍👧‍👦 نفس الطلب: ${o.kids.length} أطفال</div>` : '';
+      const sib = o.kids.length > 1 ? `<div class="sub">👨‍👧‍👦 نفس الطلب: ${o.kids.map(x => esc(x.name)).join('، ')}</div>` : '';
       const left = r.pay === 'wait' ? `<div class="sub">باقي ${minsLeft(o)} دقيقة من المهلة</div>` : '';
-      html += `<tr>
+      html += `<tr class="${r.pay === 'simahkid' ? 'row-simah' : ''}">
         <td class="sub">${n+1}</td>
         <td><div class="nm">${esc(k.name)}</div><div class="sub">${esc(k.age)} سنوات · ${esc(k.sex)}</div>${allergy}</td>
         <td>${workshops(k)}<div class="sub">${esc(o.ref)} · ${esc(o.date)}</div>${sib}</td>
         <td><div class="nm">${esc(o.parent)}</div>${waLink(o.phone)}${o.phone2?`<div class="sub">${esc(o.phone2)}</div>`:''}<div class="sub">تصوير: ${esc(o.photo)}</div></td>
-        <td>${PAY_PILL[r.pay]}${left}<div class="sub">${esc(o.total)} ريال${o.code?' · '+esc(o.code):''}</div>${/^https:\/\//.test(o.receipt)?`<a class="rc" href="${esc(o.receipt)}" target="_blank" rel="noopener">عرض الإيصال</a>`:''}</td>
-        <td><div class="mini">${btn('reg',r.oi,'contacted',o.contacted,'📞 تواصلت')}${btn('reg',r.oi,'paid',o.paid,'💳 تأكّد الدفع')}${btn('reg',r.oi,'attend',o.attend,'✅ أكّد الحضور')}${btn('reg',r.oi,'nopay',o.nopay,'🚫 ما دفعت','neg')}${btn('reg',r.oi,'cancel',o.cancel,'❌ ألغت','neg')}</div><button type="button" class="del-btn" onclick="delRow('reg',${r.oi})">🗑 حذف (مكرر)</button></td>
-        <td>${noteCell('reg', r.oi, o.note)}</td></tr>`;
+        <td>${PAY_PILL[r.pay]}${left}<div class="sub">إجمالي الطلب ${esc(o.total)} ريال${o.code?' · '+esc(o.code):''}</div>${/^https:\/\//.test(o.receipt)?`<a class="rc" href="${esc(o.receipt)}" target="_blank" rel="noopener">عرض الإيصال</a>`:''}</td>
+        <td><div class="mini">${btn(ref,'contacted',k.contacted,'📞 تواصلت')}${btn(ref,'paid',k.paid,'💳 تأكّد الدفع')}${btn(ref,'attend',k.attend,'✅ أكّد الحضور')}${btn(ref,'simahkid',k.simahkid,'⭐ من أطفال سمة (مجاني)')}${btn(ref,'nopay',k.nopay,'🚫 ما دفعت','neg')}${btn(ref,'cancel',k.cancel,'❌ ألغت','neg')}</div><button type="button" class="del-btn" onclick="delRow('${ref}')">🗑 حذف (مكرر)</button></td>
+        <td>${msgBtn(ref)}${noteCell(ref, k.note)}</td></tr>`;
     } else if (r.type === 'simah'){
-      const s = r.s;
+      const s = r.s, ref = `simah:${r.si}`;
       html += `<tr class="row-simah">
         <td class="sub">${n+1}</td>
         <td><div class="nm">${esc(s.name)}</div><div class="sub">${s.age?esc(s.age)+' سنوات':''}</div></td>
         <td>${workshops(s)}<div class="sub">أُضيف ${esc(s.date)}</div></td>
         <td><div class="nm">${esc(s.parent)}</div>${s.phone?waLink(s.phone):''}</td>
         <td><span class="pill star">⭐ طالب في سمة · مجاني</span>${s.cancel?PAY_PILL.cancelled:''}</td>
-        <td><div class="mini">${btn('simah',r.si,'contacted',s.contacted,'📞 تواصلت')}${btn('simah',r.si,'attend',s.attend,'✅ أكّد الحضور')}${btn('simah',r.si,'cancel',s.cancel,'❌ ألغت','neg')}</div></td>
-        <td>${noteCell('simah', r.si, s.note)}<div><button type="button" class="del-btn edit" onclick="openAdd(${r.si})">✏️ تعديل البيانات</button> <button type="button" class="del-btn" onclick="delKid(${r.si})">🗑 حذف</button></div></td></tr>`;
+        <td><div class="mini">${btn(ref,'contacted',s.contacted,'📞 تواصلت')}${btn(ref,'attend',s.attend,'✅ أكّد الحضور')}${btn(ref,'cancel',s.cancel,'❌ ألغت','neg')}</div>
+          <div><button type="button" class="del-btn edit" onclick="openAdd(${r.si})">✏️ تعديل البيانات</button> <button type="button" class="del-btn" onclick="delKid(${r.si})">🗑 حذف</button></div></td>
+        <td>${msgBtn(ref)}${noteCell(ref, s.note)}</td></tr>`;
     } else {
-      const f = r.f;
+      const f = r.f, ref = `free:${r.fi}`;
       html += `<tr class="row-free">
         <td class="sub">${n+1}</td>
         <td><div class="nm">عائلة ${esc(f.parent)}</div><span class="pill">👤 ${esc(f.adults)} بالغ</span><span class="pill">🧒 ${esc(f.kids)} طفل</span>${f.ages?`<div class="sub">الأعمار: ${esc(f.ages)}</div>`:''}</td>
         <td><span class="pill free">🎈 الفعاليات المجانية</span><div class="sub">${esc(f.date)}</div></td>
         <td><div class="nm">${esc(f.parent)}</div>${waLink(f.phone)}<div class="sub">تصوير: ${esc(f.photo)}</div></td>
         <td><span class="sub">مجاني</span>${f.cancel?PAY_PILL.cancelled:''}</td>
-        <td><div class="mini">${btn('free',r.fi,'contacted',f.contacted,'📞 تواصلت')}${btn('free',r.fi,'attend',f.attend,'✅ أكّد الحضور')}${btn('free',r.fi,'cancel',f.cancel,'❌ ألغت','neg')}</div><button type="button" class="del-btn" onclick="delRow('free',${r.fi})">🗑 حذف (مكرر)</button></td>
-        <td>${noteCell('free', r.fi, f.note)}</td></tr>`;
+        <td><div class="mini">${btn(ref,'contacted',f.contacted,'📞 تواصلت')}${btn(ref,'attend',f.attend,'✅ أكّد الحضور')}${btn(ref,'cancel',f.cancel,'❌ ألغت','neg')}</div><button type="button" class="del-btn" onclick="delRow('${ref}')">🗑 حذف (مكرر)</button></td>
+        <td>${msgBtn(ref)}${noteCell(ref, f.note)}</td></tr>`;
     }
   });
   document.getElementById('odContent').innerHTML = html + '</tbody></table></div>';
 }
 
-function odItem(kind, i){ return kind === 'reg' ? OD.orders[i] : kind === 'simah' ? OD.simah[i] : OD.free[i]; }
-function odKey(kind, item){ return kind === 'reg' ? item.ref : kind === 'simah' ? item.id : item.row; }
-
+/* ref = "reg:oi:ki" | "simah:si" | "free:fi" */
+function resolve(ref){
+  const [kind, a, b] = ref.split(':'); const i = Number(a);
+  if (kind === 'reg'){ const o = OD.orders[i], k = o.kids[Number(b)]; return { kind, o, k, item: k, body: { kind, key: o.ref, row: k.row } }; }
+  if (kind === 'simah'){ const s = OD.simah[i]; return { kind, item: s, body: { kind, key: s.id } }; }
+  const f = OD.free[i]; return { kind, item: f, body: { kind, key: f.row } };
+}
 async function odPost(body){
   await fetch(OD_URL, { method: 'POST', headers: {'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(body) });
 }
-async function odSend(kind, item, field, value){
-  await odPost({ action: 'follow', kind, key: odKey(kind, item), field, value });
+async function odSend(ref, field, value){
+  const r = resolve(ref);
+  await odPost(Object.assign({ action: 'follow', field, value }, r.body));
+  return r;
 }
-
-async function odToggle(kind, i, field, b){
-  const item = odItem(kind, i);
-  const nv = !item[field];
+async function odToggle(ref, field, b){
+  const r = resolve(ref); const nv = !r.item[field];
   b.classList.add('saving');
-  try{ await odSend(kind, item, field, nv); item[field] = nv; renderOD(); }
+  try{ await odSend(ref, field, nv); r.item[field] = nv; renderOD(); }
   catch(e){ alert('تعذّر الحفظ، حاولي مرة أخرى.'); b.classList.remove('saving'); }
 }
+async function delRow(ref){
+  const r = resolve(ref);
+  const who = r.kind === 'reg' ? r.k.name + ' (' + r.o.ref + ')' : 'عائلة ' + r.item.parent;
+  if (!confirm('حذف تسجيل ' + who + ' من اللوحة؟\n(يبقى في الشيت معلّم «محذوف» ولا يُحسب)')) return;
+  try{
+    await odSend(ref, 'deleted', true);
+    if (r.kind === 'reg'){ r.o.kids.splice(r.o.kids.indexOf(r.k), 1); if (!r.o.kids.length) OD.orders.splice(OD.orders.indexOf(r.o), 1); }
+    else OD.free.splice(OD.free.indexOf(r.item), 1);
+    renderOD();
+  }catch(e){ alert('تعذّر الحذف، حاولي مرة أخرى.'); }
+}
 
-let noteCtx = null;
-function openNote(kind, i){
-  const item = odItem(kind, i);
-  noteCtx = { kind, i };
-  document.getElementById('noteTitle').textContent = 'ملاحظة — ' + (item.parent || item.name || '');
-  document.getElementById('noteInput').value = item.note || '';
+let noteRef = null;
+function openNote(ref){
+  const r = resolve(ref); noteRef = ref;
+  document.getElementById('noteTitle').textContent = 'ملاحظة — ' + (r.item.name || r.item.parent || '');
+  document.getElementById('noteInput').value = r.item.note || '';
   document.getElementById('noteModal').classList.add('on');
   setTimeout(() => document.getElementById('noteInput').focus(), 50);
 }
-function closeNote(){ document.getElementById('noteModal').classList.remove('on'); noteCtx = null; }
+function closeNote(){ document.getElementById('noteModal').classList.remove('on'); noteRef = null; }
 document.getElementById('noteSave').addEventListener('click', async function(){
-  if (!noteCtx) return;
-  const item = odItem(noteCtx.kind, noteCtx.i);
+  if (!noteRef) return;
   const val = document.getElementById('noteInput').value.trim();
   this.disabled = true; this.textContent = 'جارِ الحفظ...';
-  try{ await odSend(noteCtx.kind, item, 'note', val); item.note = val; closeNote(); renderOD(); }
+  try{ const r = await odSend(noteRef, 'note', val); r.item.note = val; closeNote(); renderOD(); }
   catch(e){ alert('تعذّر الحفظ، حاولي مرة أخرى.'); }
   this.disabled = false; this.textContent = 'حفظ';
 });
 document.getElementById('noteModal').addEventListener('click', e => { if (e.target.id === 'noteModal') closeNote(); });
+
+/* ========= رسائل واتساب جاهزة ========= */
+const MAP_URL = 'https://maps.app.goo.gl/7QrwTURaW4yYJhzW8';
+const WHEN = 'يوم الخميس الساعة 10:00 صباحاً';
+function wsName(k){ return [k.pizza ? 'ورشة البيتزا 🍕' : '', k.hot ? 'ورشة الهوت شوكلت ☕' : ''].filter(Boolean).join(' و'); }
+function buildMsg(ref){
+  const r = resolve(ref);
+  const P = r.kind === 'reg' ? r.o.parent : r.item.parent;
+  const hi = `السلام عليكم ${P || ''} 🌷\n`;
+  const loc = `\n📍 الموقع: ${MAP_URL}\n⏰ ${WHEN}`;
+  if (r.kind === 'free'){
+    return { label: 'تذكير بالفعاليات المجانية', text: hi + `يسعدنا تسجيلكم لحضور الفعاليات المجانية في اليوم المفتوح بسمة للأطفال 🎈\nنذكّركم بموعدنا ${WHEN}، ونتطلع لاستقبالكم 💛` + loc };
+  }
+  if (r.kind === 'simah'){
+    const s = r.item;
+    return { label: 'ترحيب بطفل من سمة (مجاني)', text: hi + `يسعدنا نخبركم إن ${s.name} مسجّل معنا في ${wsName(s)} باليوم المفتوح، وحضوره مجاني لأنه من أطفال سمة ⭐\nنذكّركم بالموعد ${WHEN}، ونشوفكم على خير 💛` + loc };
+  }
+  const k = r.k, st = payState(r.o, k);
+  if (st === 'simahkid') return { label: 'طفل من سمة (مجاني)', text: hi + `حبينا نطمنكم إن ${k.name} من أطفال سمة، فحضوره في ${wsName(k)} مجاني ولا يحتاج تحويل ⭐\nنذكّركم بالموعد ${WHEN}، ونشوفكم على خير 💛` + loc };
+  if (st === 'confirmed' || st === 'receipt') return { label: 'تذكير بالموعد (دافعين)', text: hi + `وصلنا تحويلكم، شكراً لكم 🙏\nنذكّركم إن ${k.name} مسجّل في ${wsName(k)} باليوم المفتوح، وموعدنا ${WHEN}.\nنرجو الحضور قبل الموعد بـ10 دقائق 💛` + loc };
+  if (st === 'wait') return { label: 'تذكير برفع الإيصال', text: hi + `شكراً لتسجيل ${k.name} في ${wsName(k)} 🌟\nمقعده محجوز مؤقتاً، ونذكّركم بتحويل الرسوم ورفع الإيصال حتى نثبّت الحجز.\nإذا احتجتوا أي مساعدة احنا موجودين 💛` };
+  if (st === 'cancelled') return { label: 'بعد الإلغاء', text: hi + `وصلنا إلغاء حضور ${k.name}، ونتمنى نشوفكم في فعالياتنا الجاية بإذن الله 💛\nولا تنسون إن الفعاليات المجانية في اليوم المفتوح مفتوحة لكل العائلة 🎈` };
+  return { label: 'سؤال عن الحجز (انتهى / ما دفع)', text: hi + `لاحظنا إن حجز ${k.name} في ${wsName(k)} انتهت مهلته وما وصلنا إيصال التحويل.\nهل حابين تكملون الحجز؟ إذا حابين، حوّلوا الرسوم وأرسلوا لنا صورة الإيصال هنا ونثبّت لكم المقعد إذا كان متاح 🌷` };
+}
+let msgRef = null;
+function openMsg(ref){
+  msgRef = ref; const m = buildMsg(ref);
+  document.getElementById('msgTitle').textContent = '💬 ' + m.label;
+  document.getElementById('msgInput').value = m.text;
+  document.getElementById('msgCopy').textContent = '📋 نسخ الرسالة';
+  document.getElementById('msgModal').classList.add('on');
+}
+function closeMsg(){ document.getElementById('msgModal').classList.remove('on'); msgRef = null; }
+document.getElementById('msgModal').addEventListener('click', e => { if (e.target.id === 'msgModal') closeMsg(); });
+document.getElementById('msgCopy').addEventListener('click', async function(){
+  const t = document.getElementById('msgInput');
+  try{ await navigator.clipboard.writeText(t.value); }catch(e){ t.select(); document.execCommand('copy'); }
+  this.textContent = '✔️ تم النسخ';
+});
+document.getElementById('msgWa').addEventListener('click', function(){
+  if (!msgRef) return;
+  const r = resolve(msgRef);
+  let d = String((r.kind === 'reg' ? r.o.phone : r.item.phone) || '').replace(/\D/g,'');
+  if (d.startsWith('0')) d = d.slice(1);
+  if (d && !d.startsWith('966')) d = '966' + d;
+  window.open('https://wa.me/' + d + '?text=' + encodeURIComponent(document.getElementById('msgInput').value), '_blank', 'noopener');
+});
 
 /* إضافة طفل من سمة */
 let editIdx = null;
@@ -627,16 +701,6 @@ document.getElementById('kSave').addEventListener('click', async function(){
   }catch(e){ alert('تعذّر الحفظ، حاولي مرة أخرى.'); }
   this.disabled = false; this.textContent = editing ? 'حفظ التعديل' : 'إضافة';
 });
-async function delRow(kind, i){
-  const item = odItem(kind, i);
-  const who = kind === 'reg' ? item.kids.map(k => k.name).join(' و ') + ' (' + item.ref + ')' : 'عائلة ' + item.parent;
-  const extra = kind === 'reg' && item.kids.length > 1 ? '
-تنبيه: الطلب فيه ' + item.kids.length + ' أطفال، وبينحذفون كلهم.' : '';
-  if (!confirm('حذف تسجيل ' + who + ' من اللوحة؟' + extra + '
-(يبقى في الشيت معلّم «محذوف» ولا يُحسب)')) return;
-  try{ await odSend(kind, item, 'deleted', true); (kind === 'reg' ? OD.orders : OD.free).splice(i, 1); renderOD(); }
-  catch(e){ alert('تعذّر الحذف، حاولي مرة أخرى.'); }
-}
 async function delKid(i){
   const s = OD.simah[i];
   if (!confirm('حذف ' + (s.name || 'الطفل') + ' من القائمة؟')) return;
