@@ -163,6 +163,9 @@
   .ck{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;}
   .modal-box{max-height:90vh;overflow:auto;}
   .sub{font-size:12px;color:var(--ink-soft);}
+  .toggle-btn.neg.on{background:#F6E3E1;border-color:var(--pink);color:#9A4F4B;}
+  .pill.gray{background:#E9E4DD;color:#6E665C;}
+  .del-btn.edit{color:var(--teal);}
 </style>
 </head>
 <body>
@@ -214,6 +217,9 @@
         <li><span class="pill warn">⌛ انتهى الحجز</span> <b>خلصت الساعة وما رفع إيصال</b>، فالمقعد ما عاد محجوز له. تواصلوا معه إذا ودّه يكمل.</li>
         <li><span class="pill ok">🧾 إيصال مرفوع</span> رفع إيصال التحويل. افتحوا الإيصال وتأكدوا إن المبلغ وصل، وبعدها اضغطوا <b>💳 تأكّد الدفع</b>.</li>
         <li><span class="pill ok">✔️ مدفوع ومؤكّد</span> تأكدتوا إن المبلغ وصل.</li>
+        <li><span class="pill warn">🚫 ما دفعت</span> تواصلتوا معها وما راح تدفع. ما تنحسب من المقاعد.</li>
+        <li><span class="pill gray">❌ ألغت</span> الأم ألغت الحضور. ما تنحسب من المقاعد.</li>
+        <li><b>🗑 حذف (مكرر)</b> للتسجيلات المكررة بس. يختفي التسجيل من اللوحة ويبقى في الشيت معلّم «محذوف».</li>
         <li><span class="pill star">⭐ طالب في سمة</span> من أطفال سمة، حضوره مجاني.</li>
       </ul>
       <small>الأرقام تحت محسوبة <b>بعدد الأطفال</b> مو بعدد الطلبات. الطلب الواحد ممكن يكون فيه أكثر من طفل، ومتابعة الطفلين في نفس الطلب مشتركة.</small>
@@ -230,6 +236,8 @@
         <button type="button" class="fchip" data-p="paid">💳 دفعوا</button>
         <button type="button" class="fchip" data-p="wait">⏳ بانتظار التحويل</button>
         <button type="button" class="fchip" data-p="expired">⌛ انتهى الحجز</button>
+        <button type="button" class="fchip" data-p="nopay">🚫 ما دفعت</button>
+        <button type="button" class="fchip" data-p="cancelled">❌ ألغت</button>
       </div>
     </div>
     <div class="search-row">
@@ -243,7 +251,7 @@
 
 <div class="modal" id="addModal">
   <div class="modal-box">
-    <h3>إضافة طفل من أطفال سمة ⭐</h3>
+    <h3 id="addTitle">إضافة طفل من أطفال سمة ⭐</h3>
     <p class="sub" style="margin:0 0 8px">لأطفال سمة الحاليين. حضورهم مجاني، ويُحسبون من مقاعد الورش.</p>
     <label class="fl">اسم الطفل</label><input class="fi" id="kName">
     <label class="fl">العمر</label><input class="fi" id="kAge" inputmode="numeric">
@@ -254,7 +262,7 @@
       <label class="ck"><input type="checkbox" id="kPizza" checked> 🍕 البيتزا</label>
       <label class="ck"><input type="checkbox" id="kHot" checked> ☕ الهوت شوكلت</label>
     </div>
-    <label class="fl">ملاحظة <small>(اختياري)</small></label><input class="fi" id="kNote">
+    <div id="kNoteWrap"><label class="fl">ملاحظة <small>(اختياري)</small></label><input class="fi" id="kNote"></div>
     <div class="modal-actions">
       <button type="button" class="btn-save" id="kSave">إضافة</button>
       <button type="button" class="btn-cancel" onclick="closeAdd()">إلغاء</button>
@@ -415,7 +423,9 @@ async function loadOD(){
 
 /* حالة الدفع الفعلية لكل طلب */
 function payState(o){
+  if (o.cancel) return 'cancelled';
   if (o.paid) return 'confirmed';
+  if (o.nopay) return 'nopay';
   if (/مرفوع/.test(o.status)) return 'receipt';
   if (/انتهى|ملغ/.test(o.status)) return 'expired';
   if (/بانتظار/.test(o.status)) return (o.ts && Date.now() - o.ts > HOLD_MS) ? 'expired' : 'wait';
@@ -426,6 +436,8 @@ const PAY_PILL = {
   receipt:   '<span class="pill ok">🧾 إيصال مرفوع</span>',
   wait:      '<span class="pill wait">⏳ بانتظار التحويل</span>',
   expired:   '<span class="pill warn">⌛ انتهى الحجز</span>',
+  nopay:     '<span class="pill warn">🚫 ما دفعت</span>',
+  cancelled: '<span class="pill gray">❌ ألغت</span>',
   other:     ''
 };
 function minsLeft(o){ return Math.max(0, Math.ceil((HOLD_MS - (Date.now() - o.ts)) / 60000)); }
@@ -441,8 +453,8 @@ function buildRows(){
 
 function renderKpis(rows){
   const reg = rows.filter(r => r.type === 'reg');
-  const live = reg.filter(r => r.pay !== 'expired');
-  const sim = OD.simah;
+  const live = reg.filter(r => !['expired','cancelled','nopay'].includes(r.pay));
+  const sim = OD.simah.filter(s => !s.cancel);
   let pizza = 0, hot = 0;
   live.forEach(r => { if (r.k.pizza) pizza++; if (r.k.hot) hot++; });
   sim.forEach(s => { if (s.pizza) pizza++; if (s.hot) hot++; });
@@ -450,16 +462,20 @@ function renderKpis(rows){
   const confKids = reg.filter(r => r.pay === 'confirmed').length;
   const waitKids = reg.filter(r => r.pay === 'wait').length;
   const expKids = reg.filter(r => r.pay === 'expired').length;
-  const freePeople = OD.free.reduce((s,f) => s + (Number(f.adults)||0) + (Number(f.kids)||0), 0);
-  const freeKids = OD.free.reduce((s,f) => s + (Number(f.kids)||0), 0);
+  const cancKids = reg.filter(r => r.pay === 'cancelled').length + OD.simah.filter(s => s.cancel).length;
+  const nopayKids = reg.filter(r => r.pay === 'nopay').length;
+  const freePeople = OD.free.filter(f => !f.cancel).reduce((s,f) => s + (Number(f.adults)||0) + (Number(f.kids)||0), 0);
+  const freeAct = OD.free.filter(f => !f.cancel);
+  const freeKids = freeAct.reduce((s,f) => s + (Number(f.kids)||0), 0);
   const bar = (n, cap) => `<div class="bar"><i style="width:${Math.min(100, Math.round(n/cap*100))}%"></i></div>`;
   document.getElementById('odKpis').innerHTML = `
     <div class="kpi"><span>👧 أطفال الورش (محجوزين)</span><b>${live.length + sim.length} <small>طفل${sim.length?` · منهم ${sim.length} من سمة`:''}</small></b></div>
     <div class="kpi"><span>💳 أطفال دفعوا</span><b>${paidKids} <small>· تأكّد ${confKids}</small></b></div>
     <div class="kpi"><span>⏳ بانتظار التحويل / ⌛ انتهى</span><b>${waitKids} <small>/ ${expKids} طفل</small></b></div>
+    <div class="kpi"><span>❌ ألغت / 🚫 ما دفعت</span><b>${cancKids} <small>/ ${nopayKids} طفل</small></b></div>
     <div class="kpi"><span>🍕 ورشة البيتزا</span><b>${pizza} <small>/ ${OD.cap.pizza}</small></b>${bar(pizza, OD.cap.pizza)}</div>
     <div class="kpi"><span>☕ ورشة الهوت شوكليت</span><b>${hot} <small>/ ${OD.cap.hot}</small></b>${bar(hot, OD.cap.hot)}</div>
-    <div class="kpi"><span>🎈 الفعاليات المجانية</span><b>${OD.free.length} <small>عائلة · ${freeKids} طفل · ${freePeople} شخص</small></b></div>`;
+    <div class="kpi"><span>🎈 الفعاليات المجانية</span><b>${freeAct.length} <small>عائلة · ${freeKids} طفل · ${freePeople} شخص</small></b></div>`;
 }
 
 function rowText(r){
@@ -476,13 +492,14 @@ function passType(r){
 }
 function passPay(r){
   if (!payF.size) return true;
+  if (payF.has('cancelled') && ((r.type === 'reg' && r.pay === 'cancelled') || (r.type === 'simah' && r.s.cancel) || (r.type === 'free' && r.f.cancel))) return true;
   if (r.type !== 'reg') return false;
-  return (payF.has('paid') && (r.pay === 'confirmed' || r.pay === 'receipt')) ||
+  return (payF.has('nopay') && r.pay === 'nopay') || (payF.has('paid') && (r.pay === 'confirmed' || r.pay === 'receipt')) ||
          (payF.has('wait') && r.pay === 'wait') || (payF.has('expired') && r.pay === 'expired');
 }
 function workshops(k){ return (k.pizza?'<span class="pill">🍕 بيتزا</span>':'') + (k.hot?'<span class="pill">☕ هوت شوكلت</span>':''); }
-function btn(kind, idx, field, on, label){
-  return `<button type="button" class="toggle-btn ${on?'on':''}" onclick="odToggle('${kind}',${idx},'${field}',this)">${label}</button>`;
+function btn(kind, idx, field, on, label, neg){
+  return `<button type="button" class="toggle-btn ${neg?'neg':''} ${on?'on':''}" onclick="odToggle('${kind}',${idx},'${field}',this)">${label}</button>`;
 }
 function noteCell(kind, idx, note){
   return `<button type="button" class="note-btn ${note?'has':''}" onclick="openNote('${kind}',${idx})">📝 ${note?'تعديل':'إضافة'} ملاحظة</button>${note?`<div class="note-text">${esc(note)}</div>`:''}`;
@@ -510,7 +527,7 @@ function renderOD(){
         <td>${workshops(k)}<div class="sub">${esc(o.ref)} · ${esc(o.date)}</div>${sib}</td>
         <td><div class="nm">${esc(o.parent)}</div>${waLink(o.phone)}${o.phone2?`<div class="sub">${esc(o.phone2)}</div>`:''}<div class="sub">تصوير: ${esc(o.photo)}</div></td>
         <td>${PAY_PILL[r.pay]}${left}<div class="sub">${esc(o.total)} ريال${o.code?' · '+esc(o.code):''}</div>${/^https:\/\//.test(o.receipt)?`<a class="rc" href="${esc(o.receipt)}" target="_blank" rel="noopener">عرض الإيصال</a>`:''}</td>
-        <td><div class="mini">${btn('reg',r.oi,'contacted',o.contacted,'📞 تواصلت')}${btn('reg',r.oi,'paid',o.paid,'💳 تأكّد الدفع')}${btn('reg',r.oi,'attend',o.attend,'✅ أكّد الحضور')}</div></td>
+        <td><div class="mini">${btn('reg',r.oi,'contacted',o.contacted,'📞 تواصلت')}${btn('reg',r.oi,'paid',o.paid,'💳 تأكّد الدفع')}${btn('reg',r.oi,'attend',o.attend,'✅ أكّد الحضور')}${btn('reg',r.oi,'nopay',o.nopay,'🚫 ما دفعت','neg')}${btn('reg',r.oi,'cancel',o.cancel,'❌ ألغت','neg')}</div><button type="button" class="del-btn" onclick="delRow('reg',${r.oi})">🗑 حذف (مكرر)</button></td>
         <td>${noteCell('reg', r.oi, o.note)}</td></tr>`;
     } else if (r.type === 'simah'){
       const s = r.s;
@@ -519,9 +536,9 @@ function renderOD(){
         <td><div class="nm">${esc(s.name)}</div><div class="sub">${s.age?esc(s.age)+' سنوات':''}</div></td>
         <td>${workshops(s)}<div class="sub">أُضيف ${esc(s.date)}</div></td>
         <td><div class="nm">${esc(s.parent)}</div>${s.phone?waLink(s.phone):''}</td>
-        <td><span class="pill star">⭐ طالب في سمة · مجاني</span></td>
-        <td><div class="mini">${btn('simah',r.si,'contacted',s.contacted,'📞 تواصلت')}${btn('simah',r.si,'attend',s.attend,'✅ أكّد الحضور')}</div></td>
-        <td>${noteCell('simah', r.si, s.note)}<div><button type="button" class="del-btn" onclick="delKid(${r.si})">🗑 حذف</button></div></td></tr>`;
+        <td><span class="pill star">⭐ طالب في سمة · مجاني</span>${s.cancel?PAY_PILL.cancelled:''}</td>
+        <td><div class="mini">${btn('simah',r.si,'contacted',s.contacted,'📞 تواصلت')}${btn('simah',r.si,'attend',s.attend,'✅ أكّد الحضور')}${btn('simah',r.si,'cancel',s.cancel,'❌ ألغت','neg')}</div></td>
+        <td>${noteCell('simah', r.si, s.note)}<div><button type="button" class="del-btn edit" onclick="openAdd(${r.si})">✏️ تعديل البيانات</button> <button type="button" class="del-btn" onclick="delKid(${r.si})">🗑 حذف</button></div></td></tr>`;
     } else {
       const f = r.f;
       html += `<tr class="row-free">
@@ -529,8 +546,8 @@ function renderOD(){
         <td><div class="nm">عائلة ${esc(f.parent)}</div><span class="pill">👤 ${esc(f.adults)} بالغ</span><span class="pill">🧒 ${esc(f.kids)} طفل</span>${f.ages?`<div class="sub">الأعمار: ${esc(f.ages)}</div>`:''}</td>
         <td><span class="pill free">🎈 الفعاليات المجانية</span><div class="sub">${esc(f.date)}</div></td>
         <td><div class="nm">${esc(f.parent)}</div>${waLink(f.phone)}<div class="sub">تصوير: ${esc(f.photo)}</div></td>
-        <td><span class="sub">مجاني</span></td>
-        <td><div class="mini">${btn('free',r.fi,'contacted',f.contacted,'📞 تواصلت')}${btn('free',r.fi,'attend',f.attend,'✅ أكّد الحضور')}</div></td>
+        <td><span class="sub">مجاني</span>${f.cancel?PAY_PILL.cancelled:''}</td>
+        <td><div class="mini">${btn('free',r.fi,'contacted',f.contacted,'📞 تواصلت')}${btn('free',r.fi,'attend',f.attend,'✅ أكّد الحضور')}${btn('free',r.fi,'cancel',f.cancel,'❌ ألغت','neg')}</div><button type="button" class="del-btn" onclick="delRow('free',${r.fi})">🗑 حذف (مكرر)</button></td>
         <td>${noteCell('free', r.fi, f.note)}</td></tr>`;
     }
   });
@@ -577,9 +594,19 @@ document.getElementById('noteSave').addEventListener('click', async function(){
 document.getElementById('noteModal').addEventListener('click', e => { if (e.target.id === 'noteModal') closeNote(); });
 
 /* إضافة طفل من سمة */
-function openAdd(){
-  ['kName','kAge','kParent','kPhone','kNote'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('kPizza').checked = true; document.getElementById('kHot').checked = true;
+let editIdx = null;
+function openAdd(i){
+  editIdx = (typeof i === 'number') ? i : null;
+  const s = editIdx !== null ? OD.simah[editIdx] : null;
+  document.getElementById('kName').value = s ? (s.name || '') : '';
+  document.getElementById('kAge').value = s ? (s.age || '') : '';
+  document.getElementById('kParent').value = s ? (s.parent || '') : '';
+  document.getElementById('kPhone').value = s ? (s.phone || '') : '';
+  document.getElementById('kNote').value = '';
+  document.getElementById('kNoteWrap').style.display = s ? 'none' : '';
+  document.getElementById('kPizza').checked = s ? !!s.pizza : true; document.getElementById('kHot').checked = s ? !!s.hot : true;
+  document.getElementById('addTitle').textContent = s ? 'تعديل بيانات الطفل ✏️' : 'إضافة طفل من أطفال سمة ⭐';
+  document.getElementById('kSave').textContent = s ? 'حفظ التعديل' : 'إضافة';
   document.getElementById('addModal').classList.add('on');
   setTimeout(() => document.getElementById('kName').focus(), 50);
 }
@@ -591,11 +618,25 @@ document.getElementById('kSave').addEventListener('click', async function(){
     pizza: document.getElementById('kPizza').checked, hot: document.getElementById('kHot').checked };
   if (!kid.name){ alert('اكتبي اسم الطفل'); return; }
   if (!kid.pizza && !kid.hot){ alert('اختاري ورشة وحدة على الأقل'); return; }
-  this.disabled = true; this.textContent = 'جارِ الإضافة...';
-  try{ await odPost(Object.assign({ action: 'addKid' }, kid)); closeAdd(); await loadOD(); }
-  catch(e){ alert('تعذّر الحفظ، حاولي مرة أخرى.'); }
-  this.disabled = false; this.textContent = 'إضافة';
+  const editing = editIdx !== null;
+  this.disabled = true; this.textContent = 'جارِ الحفظ...';
+  try{
+    if (editing) await odPost(Object.assign({ action: 'editKid', id: OD.simah[editIdx].id }, kid));
+    else await odPost(Object.assign({ action: 'addKid' }, kid));
+    closeAdd(); await loadOD();
+  }catch(e){ alert('تعذّر الحفظ، حاولي مرة أخرى.'); }
+  this.disabled = false; this.textContent = editing ? 'حفظ التعديل' : 'إضافة';
 });
+async function delRow(kind, i){
+  const item = odItem(kind, i);
+  const who = kind === 'reg' ? item.kids.map(k => k.name).join(' و ') + ' (' + item.ref + ')' : 'عائلة ' + item.parent;
+  const extra = kind === 'reg' && item.kids.length > 1 ? '
+تنبيه: الطلب فيه ' + item.kids.length + ' أطفال، وبينحذفون كلهم.' : '';
+  if (!confirm('حذف تسجيل ' + who + ' من اللوحة؟' + extra + '
+(يبقى في الشيت معلّم «محذوف» ولا يُحسب)')) return;
+  try{ await odSend(kind, item, 'deleted', true); (kind === 'reg' ? OD.orders : OD.free).splice(i, 1); renderOD(); }
+  catch(e){ alert('تعذّر الحذف، حاولي مرة أخرى.'); }
+}
 async function delKid(i){
   const s = OD.simah[i];
   if (!confirm('حذف ' + (s.name || 'الطفل') + ' من القائمة؟')) return;
