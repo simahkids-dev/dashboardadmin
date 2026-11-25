@@ -168,6 +168,24 @@
   .del-btn.edit{color:var(--teal);}
   .msg-btn{appearance:none;display:block;width:100%;border:0;background:#E2F3EA;color:#2E7A55;border-radius:10px;padding:7px 8px;font-family:'Thmanyah Sans',sans-serif;font-size:11px;font-weight:700;cursor:pointer;margin-bottom:6px;white-space:nowrap;}
   .btn-wa{background:#25D366;color:#fff;}
+  .all-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin:10px 0 4px;}
+  .all-btn{appearance:none;text-align:right;font-family:'Thmanyah Sans',sans-serif;background:#EEEDEA;border:1.5px dashed #A9A59D;border-radius:14px;padding:12px 14px;cursor:pointer;color:#55524C;}
+  .all-btn span{display:block;font-size:12px;font-weight:700;}
+  .all-btn b{font-family:'Thmanyah Serif Display',sans-serif;font-size:24px;}
+  .all-btn b small{font-family:'Thmanyah Sans',sans-serif;font-size:13px;font-weight:500;}
+  .all-btn em{display:block;font-style:normal;font-size:11.5px;color:#77736B;margin-top:4px;line-height:1.6;}
+  .all-btn.on{background:#DCDAD5;border-style:solid;border-color:#6F6B63;}
+  .reg-panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:var(--shadow);}
+  .reg-panel small{display:block;color:var(--ink-soft);font-size:11.5px;margin-top:6px;}
+  .reg-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+  .reg-sw{appearance:none;display:flex;align-items:center;gap:8px;border:1.5px solid #CFCBC3;border-radius:999px;padding:6px 8px 6px 12px;background:#fff;font-family:'Thmanyah Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer;color:#3A3732;}
+  .reg-sw .knob{position:relative;width:38px;height:22px;border-radius:999px;background:#C9C5BD;flex:none;transition:.2s;}
+  .reg-sw .knob::after{content:'';position:absolute;top:3px;right:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s;}
+  .reg-sw.open .knob{background:#2E9E63;}
+  .reg-sw.open .knob::after{right:19px;}
+  .reg-sw em{font-style:normal;font-size:11.5px;font-weight:600;}
+  .reg-sw.open em{color:#2E7A55;} .reg-sw.shut em{color:#B4442C;}
+  .reg-sw.shut{background:#FBF1EE;border-color:#E2B9AE;}
 </style>
 </head>
 <body>
@@ -227,7 +245,13 @@
       </ul>
       <small>الأرقام تحت محسوبة <b>بعدد الأطفال</b> مو بعدد الطلبات. الطلب الواحد ممكن يكون فيه أكثر من طفل، وكل طفل له أزرار متابعة خاصة فيه، حتى لو كان مع أخوه في نفس الطلب. زر <b>💬 رسالة واتساب</b> يجهّز لكم رسالة تناسب حالة الطفل.</small>
     </div>
+    <div class="reg-panel">
+      <b>🔒 التحكم في التسجيل</b>
+      <div class="reg-row" id="regSw">جارِ التحميل...</div>
+      <small>إذا طفّيتي التسجيل، يطلع للأهالي في موقع التسجيل «تم الاكتفاء بالتسجيل» وما يقدرون يسجّلون فيه. وتقدرين ترجعين تشغّلينه في أي وقت.</small>
+    </div>
     <div class="kpis" id="odKpis"></div>
+    <div class="all-row" id="odAll"></div>
     <div class="filters">
       <div class="chip-row" id="typeChips">
         <button type="button" class="fchip" data-f="pizza">🍕 البيتزا</button>
@@ -489,7 +513,19 @@ function renderKpis(rows){
     <div class="kpi"><span>❌ ألغت / 🚫 ما دفعت</span><b>${cnt('cancelled') + OD.simah.filter(s => s.cancel).length} <small>/ ${cnt('nopay')} طفل</small></b></div>
     <div class="kpi"><span>🍕 ورشة البيتزا</span><b>${pizza} <small>/ ${OD.cap.pizza}</small></b>${bar(pizza, OD.cap.pizza)}</div>
     <div class="kpi"><span>☕ ورشة الهوت شوكليت</span><b>${hot} <small>/ ${OD.cap.hot}</small></b>${bar(hot, OD.cap.hot)}</div>
-    <div class="kpi"><span>🎈 الفعاليات المجانية</span><b>${freeAct.length} <small>عائلة · ${freeKids} طفل · ${freePeople} شخص</small></b></div>`;
+    <div class="kpi"><span>🎈 الفعاليات المجانية</span><b>${freeAct.length} <small>عائلة · ${freeKids} طفل · ${freePeople} شخص</small></b></div>`;  const ALLST = ['confirmed','receipt','wait','expired'];
+  const allN = w => reg.filter(r => r.k[w] && ALLST.includes(r.pay)).length;
+  const exN = w => reg.filter(r => r.k[w] && r.pay === 'expired').length;
+  const card = (w, ic, nm) => `<button type="button" class="all-btn ${allW===w?'on':''}" onclick="showAll('${w}')"><span>${ic} كل المسجلين في ${nm}</span><b>${allN(w)} <small>طفل</small></b><em>⚠️ هذا مجموع اللي سجّلوا في ${nm} سواء دفعوا أو انتهى حجزهم (منهم ${exN(w)} انتهى حجزهم). مو كلهم محجوز لهم مقعد.</em></button>`;
+  document.getElementById('odAll').innerHTML = card('pizza','🍕','ورشة البيتزا') + card('hot','☕','ورشة الهوت شوكلت');
+}
+let allW = null;
+function showAll(w){
+  typeF.clear(); payF.clear();
+  if (allW === w) allW = null; else { allW = w; typeF.add(w); ['paid','wait','expired'].forEach(p => payF.add(p)); }
+  document.querySelectorAll('#typeChips .fchip').forEach(c => c.classList.toggle('on', typeF.has(c.dataset.f)));
+  document.querySelectorAll('#payChips .fchip').forEach(c => c.classList.toggle('on', payF.has(c.dataset.p)));
+  renderOD();
 }
 
 function rowText(r){
@@ -575,6 +611,31 @@ function resolve(ref){
   if (kind === 'simah'){ const s = OD.simah[i]; return { kind, item: s, body: { kind, key: s.id } }; }
   const f = OD.free[i]; return { kind, item: f, body: { kind, key: f.row } };
 }
+/* إيقاف وتشغيل التسجيل */
+let REG = null;
+const REG_NAMES = { pizza: '🍕 ورشة البيتزا', hot: '☕ ورشة الهوت شوكلت', free: '🎈 الفعاليات المجانية' };
+async function loadReg(){
+  try { const r = await fetch(OD_URL + '?action=seats&_=' + Date.now()).then(r => r.json()); REG = r.closed || {}; }
+  catch(e){ REG = null; }
+  renderReg();
+}
+function renderReg(){
+  const el = document.getElementById('regSw'); if (!el) return;
+  if (!REG) { el.textContent = 'تعذّر تحميل حالة التسجيل.'; return; }
+  el.innerHTML = Object.keys(REG_NAMES).map(k => {
+    const open = !REG[k];
+    return `<button type="button" class="reg-sw ${open ? 'open' : 'shut'}" onclick="toggleReg('${k}', this)"><span>${REG_NAMES[k]}</span><i class="knob"></i><em>${open ? 'التسجيل مفتوح' : 'التسجيل موقوف'}</em></button>`;
+  }).join('');
+}
+async function toggleReg(k, btn){
+  const closing = !REG[k];
+  if (!confirm((closing ? 'إيقاف التسجيل في ' : 'تشغيل التسجيل في ') + REG_NAMES[k] + '؟')) return;
+  btn.disabled = true;
+  try { await odPost({ action: 'setReg', key: k, closed: closing }); await loadReg(); }
+  catch(e){ alert('تعذّر الحفظ، حاولي مرة أخرى.'); btn.disabled = false; }
+}
+loadReg();
+
 async function odPost(body){
   await fetch(OD_URL, { method: 'POST', headers: {'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(body) });
 }
@@ -710,10 +771,10 @@ async function delKid(i){
 
 /* التصنيفات */
 document.querySelectorAll('#typeChips .fchip').forEach(c => c.addEventListener('click', () => {
-  const f = c.dataset.f; typeF.has(f) ? typeF.delete(f) : typeF.add(f); c.classList.toggle('on', typeF.has(f)); renderOD();
+  const f = c.dataset.f; typeF.has(f) ? typeF.delete(f) : typeF.add(f); c.classList.toggle('on', typeF.has(f)); allW = null; renderOD();
 }));
 document.querySelectorAll('#payChips .fchip').forEach(c => c.addEventListener('click', () => {
-  const f = c.dataset.p; payF.has(f) ? payF.delete(f) : payF.add(f); c.classList.toggle('on', payF.has(f)); renderOD();
+  const f = c.dataset.p; payF.has(f) ? payF.delete(f) : payF.add(f); c.classList.toggle('on', payF.has(f)); allW = null; renderOD();
 }));
 document.getElementById('odSearch').addEventListener('input', renderOD);
 
